@@ -6,12 +6,17 @@ on:
 jobs:
   build:
     name: Build Manager from 19d9e1f
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+
+    env:
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_NDK_VERSION: 29.0.14206865
 
     steps:
 
       # ============================================================
-      # 1. Checkout EXACT r20 KernelSU-Next commit
+      # 1. Checkout EXACT KernelSU-Next commit
       # ============================================================
 
       - name: Checkout KernelSU-Next 19d9e1f
@@ -23,10 +28,10 @@ jobs:
 
 
       # ============================================================
-      # 2. Verify we really have the correct commit
+      # 2. Verify commit
       # ============================================================
 
-      - name: Verify commit
+      - name: Verify KernelSU commit
         run: |
           echo "Expected:"
           echo "19d9e1f255d4afedb85eb7032f4725cda6d25d36"
@@ -39,11 +44,11 @@ jobs:
           git log -1 --oneline
 
           test "$(git rev-parse HEAD)" = \
-          "19d9e1f255d4afedb85eb7032f4725cda6d25d36"
+            "19d9e1f255d4afedb85eb7032f4725cda6d25d36"
 
 
       # ============================================================
-      # 3. Java 21
+      # 3. Setup Java 21
       # ============================================================
 
       - name: Setup Java 21
@@ -54,25 +59,78 @@ jobs:
 
 
       # ============================================================
-      # 4. Android SDK
-      # ============================================================
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-
-      # ============================================================
-      # 5. Install SDK / NDK versions used by this commit
+      # 4. Configure existing Android SDK
       #
-      # IMPORTANT:
-      # Do NOT install "tools"
+      # DO NOT use android-actions/setup-android.
       # ============================================================
 
-      - name: Install Android SDK components
+      - name: Configure Android SDK
         run: |
-          yes | sdkmanager --licenses || true
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK_ROOT/emulator" >> "$GITHUB_PATH"
 
-          sdkmanager \
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+
+          ls -la "$ANDROID_SDK_ROOT"
+
+          echo ""
+          echo "Available command line tools:"
+          find "$ANDROID_SDK_ROOT/cmdline-tools" -maxdepth 2 -type f \
+            -name sdkmanager -print
+
+
+      # ============================================================
+      # 5. Locate sdkmanager
+      # ============================================================
+
+      - name: Check sdkmanager
+        run: |
+          SDKMANAGER=""
+
+          if [ -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          elif [ -x "$ANDROID_SDK_ROOT/cmdline-tools/16.0/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/16.0/bin/sdkmanager"
+          else
+            SDKMANAGER=$(find "$ANDROID_SDK_ROOT/cmdline-tools" \
+              -type f \
+              -name sdkmanager \
+              -print -quit)
+          fi
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager not found"
+            exit 1
+          fi
+
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+
+          echo "Using:"
+          echo "$SDKMANAGER"
+
+          "$SDKMANAGER" --version
+
+
+      # ============================================================
+      # 6. Accept licenses
+      # ============================================================
+
+      - name: Accept Android licenses
+        run: |
+          yes | "$SDKMANAGER" --licenses || true
+
+
+      # ============================================================
+      # 7. Install required Android SDK packages
+      #
+      # NO "tools" PACKAGE HERE.
+      # ============================================================
+
+      - name: Install Android SDK packages
+        run: |
+          "$SDKMANAGER" \
             "platform-tools" \
             "platforms;android-36" \
             "build-tools;36.1.0" \
@@ -80,20 +138,26 @@ jobs:
 
 
       # ============================================================
-      # 6. Configure Android NDK
+      # 8. Configure NDK
       # ============================================================
 
-      - name: Configure Android environment
+      - name: Configure Android NDK
         run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" \
+            >> "$GITHUB_ENV"
+
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/29.0.14206865" \
+            >> "$GITHUB_ENV"
+
+          echo "NDK:"
+          ls -la "$ANDROID_SDK_ROOT/ndk/29.0.14206865"
 
 
       # ============================================================
-      # 7. Install Linux build dependencies
+      # 9. Install Linux dependencies
       # ============================================================
 
-      - name: Install dependencies
+      - name: Install Linux dependencies
         run: |
           sudo apt-get update
 
@@ -107,7 +171,7 @@ jobs:
 
 
       # ============================================================
-      # 8. Rust
+      # 10. Setup Rust
       # ============================================================
 
       - name: Setup Rust
@@ -117,9 +181,7 @@ jobs:
 
 
       # ============================================================
-      # 9. Install Cross
-      #
-      # The 19d9e1f build.sh explicitly uses "cross".
+      # 11. Install Cross
       # ============================================================
 
       - name: Install cross
@@ -128,29 +190,45 @@ jobs:
 
 
       # ============================================================
-      # 10. Verify Android NDK
+      # 12. Verify build environment
       # ============================================================
 
-      - name: Verify Android environment
+      - name: Verify build environment
         run: |
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+          echo "================================"
+          echo "Java"
+          echo "================================"
+          java -version
 
-          "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" \
-            --version
-
+          echo ""
+          echo "================================"
+          echo "Rust"
+          echo "================================"
           rustc --version
           cargo --version
           cross --version
 
+          echo ""
+          echo "================================"
+          echo "Android"
+          echo "================================"
+          "$SDKMANAGER" --version
+
+          echo ""
+          echo "================================"
+          echo "NDK"
+          echo "================================"
+          "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" \
+            --version
+
 
       # ============================================================
-      # 11. Build ksud EXACTLY like 19d9e1f build.sh
+      # 13. Build ksud
       # ============================================================
 
       - name: Build ksud ARM64
         run: |
-          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot -I$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/aarch64-linux-android -I$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include"
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot -I$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/aarch64-linux-android -I$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include"
 
           CROSS_NO_WARNINGS=0 cross build \
             --target aarch64-linux-android \
@@ -159,7 +237,7 @@ jobs:
 
 
       # ============================================================
-      # 12. Verify ksud
+      # 14. Verify ksud
       # ============================================================
 
       - name: Verify ksud
@@ -172,12 +250,10 @@ jobs:
 
 
       # ============================================================
-      # 13. Copy ksud into Manager
-      #
-      # This is exactly what 19d9e1f build.sh does.
+      # 15. Copy ksud into Manager
       # ============================================================
 
-      - name: Copy ksud into Manager
+      - name: Copy ksud
         run: |
           mkdir -p manager/app/src/main/jniLibs/arm64-v8a
 
@@ -190,7 +266,7 @@ jobs:
 
 
       # ============================================================
-      # 14. Run the EXACT Manager setup.sh from 19d9e1f
+      # 16. Run Manager setup
       # ============================================================
 
       - name: Run Manager setup.sh
@@ -201,20 +277,34 @@ jobs:
 
 
       # ============================================================
-      # 15. Display generated APK
+      # 17. Build APK
+      # ============================================================
+
+      - name: Build Manager APK
+        working-directory: manager
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon clean assembleRelease
+
+
+      # ============================================================
+      # 18. Find APK
       # ============================================================
 
       - name: Find APK
         run: |
-          echo "Generated APK:"
+          echo "================================"
+          echo "APK OUTPUT"
+          echo "================================"
+
           find manager/app/build/outputs/apk/release \
             -type f \
             -name "*.apk" \
-            -print
+            -exec ls -lh {} \;
 
 
       # ============================================================
-      # 16. Upload APK
+      # 19. Upload APK
       # ============================================================
 
       - name: Upload APK
