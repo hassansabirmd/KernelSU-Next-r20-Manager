@@ -33,7 +33,10 @@ jobs:
       # ---------------------------------------------------------
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-
+        with:
+          cmdline-tools-version: 16.0
+          packages: |
+            platform-tools
       # ---------------------------------------------------------
       # 4. Android NDK
       # ---------------------------------------------------------
@@ -42,7 +45,6 @@ jobs:
           yes | sdkmanager --licenses || true
 
           sdkmanager \
-            "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0" \
             "ndk;27.2.12479018"
