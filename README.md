@@ -1,0 +1,1 @@
+# KernelSU-Next-r20-Manager
